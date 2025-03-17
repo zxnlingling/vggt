@@ -131,7 +131,7 @@ def predictions_to_glb(
             sky_mask_array = np.array(sky_mask_list)
 
             # Apply sky mask to confidence scores
-            sky_mask_binary = (sky_mask_array > 0.1).astype(np.float32)  
+            sky_mask_binary = (sky_mask_array > 0.1).astype(np.float32)
             pred_world_points_conf = pred_world_points_conf * sky_mask_binary
 
     if selected_frame_idx is not None:
@@ -160,7 +160,7 @@ def predictions_to_glb(
     if mask_black_bg:
         black_bg_mask = colors_rgb.sum(axis=1) >= 16
         conf_mask = conf_mask & black_bg_mask
-        
+
     if mask_white_bg:
         # Filter out white background pixels (RGB values close to white)
         # Consider pixels white if all RGB values are above 240
@@ -392,7 +392,7 @@ def segment_sky(image_path, onnx_session, mask_filename=None):
     # The model outputs low values for sky, high values for non-sky
     output_mask = np.zeros_like(result_map_original)
     output_mask[result_map_original < 32] = 255  # Use threshold of 32
-    
+
     os.makedirs(os.path.dirname(mask_filename), exist_ok=True)
     cv2.imwrite(mask_filename, output_mask)
     return output_mask

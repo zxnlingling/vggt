@@ -217,7 +217,7 @@ def gradio_demo(
     # Handle None frame_filter
     if frame_filter is None:
         frame_filter = "All"
-        
+
     # Build a GLB file name
     glbfile = os.path.join(
         target_dir,
@@ -379,9 +379,9 @@ with gr.Blocks(
     # Instead of gr.State, we use a hidden Textbox:
     is_example = gr.Textbox(label="is_example", visible=False, value="None")
     num_images = gr.Textbox(label="num_images", visible=False, value="None")
-    
+
     gr.HTML(
-    """
+        """
     <h1>🏛️ VGGT: Visual Geometry Grounded Transformer</h1>
     <p>
     <a href="https://github.com/facebookresearch/vggt">🐙 GitHub Repository</a> |
@@ -542,7 +542,16 @@ with gr.Blocks(
         fn=update_log, inputs=[], outputs=[log_output]
     ).then(
         fn=gradio_demo,
-        inputs=[target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode],
+        inputs=[
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+        ],
         outputs=[reconstruction_output, log_output, frame_filter],
     ).then(
         fn=lambda: "False", inputs=[], outputs=[is_example]  # set is_example to "False"
@@ -553,37 +562,107 @@ with gr.Blocks(
     # -------------------------------------------------------------------------
     conf_thres.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     frame_filter.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     mask_black_bg.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     mask_white_bg.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     show_cam.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     mask_sky.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     prediction_mode.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
 
