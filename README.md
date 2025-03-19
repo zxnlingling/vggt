@@ -58,9 +58,10 @@ model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
 image_names = ["path/to/imageA.png", "path/to/imageB.png", "path/to/imageC.png"]  
 images = load_and_preprocess_images(image_names).to(device)
 
-with torch.no_grad() and torch.cuda.amp.autocast(dtype=dtype):
-    # Predict attributes including cameras, depth maps, and point maps.
-    predictions = model(images)
+with torch.no_grad():
+    with torch.cuda.amp.autocast(dtype=dtype):
+        # Predict attributes including cameras, depth maps, and point maps.
+        predictions = model(images)
 ```
 
 The model weights will be automatically downloaded from Hugging Face. If you encounter issues such as slow loading, you can manually download them [here](https://huggingface.co/facebook/VGGT-1B/blob/main/model.pt) and load, or:
