@@ -263,9 +263,9 @@ def main():
     else:
         point_conf_np = point_conf
     
-    # # Normalize confidence values to 0-1 range 
-    # if np.max(point_conf_np) > 1.0:
-    #     point_conf_np = point_conf_np / np.max(point_conf_np)
+    # Normalize confidence values to 0-1 range 
+    if np.max(point_conf_np) > 1.0:
+        point_conf_np = point_conf_np / np.max(point_conf_np)
     
     print(f"Confidence range: {np.min(point_conf_np):.4f} - {np.max(point_conf_np):.4f}")
     
