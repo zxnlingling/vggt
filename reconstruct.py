@@ -29,6 +29,247 @@ from vggt.utils.geometry import unproject_depth_map_to_point_map
 # -------------------------------------------------------------------------
 # Overlapping Batch Processing Functions
 # -------------------------------------------------------------------------
+
+
+def improve_camera_based_initialization(source_cameras, target_cameras, source_images, target_images):
+    """
+    Create a better initial transformation using camera poses to prevent bottom-to-top matching issues
+    """
+    print("Finding optimal camera alignment...")
+    
+    # Find overlapping camera frames if any
+    source_filenames = [os.path.splitext(os.path.basename(path))[0] for path in source_images]
+    target_filenames = [os.path.splitext(os.path.basename(path))[0] for path in target_images]
+    common_files = set(source_filenames) & set(target_filenames)
+    
+    # Get indices in each batch
+    source_overlap_idx = [source_filenames.index(f) for f in common_files if f in source_filenames]
+    target_overlap_idx = [target_filenames.index(f) for f in common_files if f in target_filenames]
+    
+    # Try multiple alignment strategies and choose the best one
+    alignment_options = []
+    
+    # Option 1: Use overlapping cameras if available
+    if len(source_overlap_idx) >= 3:
+        print(f"Strategy 1: Using {len(source_overlap_idx)} explicitly overlapping cameras")
+        source_pts = source_cameras[source_overlap_idx]
+        target_pts = target_cameras[target_overlap_idx]
+        
+        # Calculate transformation
+        transform, error = compute_rigid_transform(source_pts, target_pts)
+        alignment_options.append(("Overlapping Cameras", transform, error, source_overlap_idx, target_overlap_idx))
+    
+    # Option 2: Try start-to-end alignment (last cameras of target to first cameras of source)
+    num_match = min(8, min(len(source_cameras), len(target_cameras)))
+    source_start_idx = list(range(num_match))
+    target_end_idx = list(range(len(target_cameras) - num_match, len(target_cameras)))
+    
+    print(f"Strategy 2: Matching last {num_match} cameras of target to first {num_match} cameras of source")
+    source_pts = source_cameras[:num_match]
+    target_pts = target_cameras[-num_match:]
+    transform, error = compute_rigid_transform(source_pts, target_pts)
+    alignment_options.append(("Start-to-End", transform, error, source_start_idx, target_end_idx))
+    
+    # Option 3: Try end-to-start alignment (first cameras of target to last cameras of source)
+    source_end_idx = list(range(len(source_cameras) - num_match, len(source_cameras)))
+    target_start_idx = list(range(num_match))
+    
+    print(f"Strategy 3: Matching first {num_match} cameras of target to last {num_match} cameras of source")
+    source_pts = source_cameras[-num_match:]
+    target_pts = target_cameras[:num_match]
+    transform, error = compute_rigid_transform(source_pts, target_pts)
+    alignment_options.append(("End-to-Start", transform, error, source_end_idx, target_start_idx))
+    
+    # Choose the best alignment based on error
+    alignment_options.sort(key=lambda x: x[2])
+    best_alignment = alignment_options[0]
+    
+    print(f"Selected alignment strategy: {best_alignment[0]} with error: {best_alignment[2]:.6f}")
+    return best_alignment[1], best_alignment[3], best_alignment[4]
+
+
+def compute_rigid_transform(source_pts, target_pts):
+    """Calculate optimal rigid transform between point sets and return error metric"""
+    # Calculate centroids
+    source_centroid = np.mean(source_pts, axis=0)
+    target_centroid = np.mean(target_pts, axis=0)
+    
+    # Center the points
+    source_centered = source_pts - source_centroid
+    target_centered = target_pts - target_centroid
+    
+    # Compute rotation using SVD
+    H = np.dot(source_centered.T, target_centered)
+    U, _, Vt = np.linalg.svd(H)
+    R = np.dot(Vt.T, U.T)
+    
+    # Ensure proper rotation matrix (det=1)
+    if np.linalg.det(R) < 0:
+        Vt[-1, :] *= -1
+        R = np.dot(Vt.T, U.T)
+    
+    # Translation
+    t = target_centroid - np.dot(R, source_centroid)
+    
+    # Create transformation matrix
+    transformation = np.eye(4)
+    transformation[:3, :3] = R
+    transformation[:3, 3] = t
+    
+    # Calculate error metric (average distance after transform)
+    transformed_source = np.dot(source_centered, R.T) + target_centroid
+    error = np.mean(np.linalg.norm(transformed_source - target_pts, axis=1))
+    
+    return transformation, error
+
+
+def visualize_registration_overlap(source_pcd, target_pcd, source_cameras, target_cameras, 
+                                  source_overlap_idx, target_overlap_idx, transformation, output_path):
+    """
+    Create a visualization GLB showing both point clouds and their camera positions
+    """
+    # Transform source to align with target
+    source_transformed = copy.deepcopy(source_pcd)
+    source_transformed.transform(transformation)
+    
+    # Color the point clouds differently
+    source_points = np.asarray(source_transformed.points)
+    source_colors = np.ones((len(source_points), 3)) * [1.0, 0.7, 0.0]  # Yellow for source
+    
+    target_points = np.asarray(target_pcd.points)
+    target_colors = np.ones((len(target_points), 3)) * [0.0, 0.65, 0.93]  # Blue for target
+    
+    # Combine the point clouds
+    all_points = np.vstack((source_points, target_points))
+    all_colors = np.vstack((source_colors, target_colors))
+    all_colors = (all_colors * 255).astype(np.uint8)
+    
+    # Create trimesh scene
+    scene = trimesh.Scene()
+    
+    # Add the combined point cloud
+    cloud = trimesh.PointCloud(vertices=all_points, colors=all_colors)
+    scene.add_geometry(cloud)
+    
+    # Transform source cameras
+    transformed_source_cameras = []
+    for cam in source_cameras:
+        # Convert to homogeneous coordinates
+        cam_h = np.ones(4)
+        cam_h[:3] = cam
+        # Transform
+        cam_transformed = transformation @ cam_h
+        transformed_source_cameras.append(cam_transformed[:3])
+    
+    # Add camera positions as spheres
+    for i, cam_pos in enumerate(transformed_source_cameras):
+        # Red for overlapping source cameras, orange for others
+        color = [255, 0, 0, 255] if i in source_overlap_idx else [255, 165, 0, 255]
+        sphere = trimesh.primitives.Sphere(radius=0.05, center=cam_pos)
+        sphere.visual.face_colors = color
+        scene.add_geometry(sphere)
+    
+    for i, cam_pos in enumerate(target_cameras):
+        # Green for overlapping target cameras, cyan for others
+        color = [0, 255, 0, 255] if i in target_overlap_idx else [0, 255, 255, 255]
+        sphere = trimesh.primitives.Sphere(radius=0.05, center=cam_pos)
+        sphere.visual.face_colors = color
+        scene.add_geometry(sphere)
+    
+    # Add camera trajectory lines using cylinders instead of paths
+    # Source trajectory (red)
+    if len(transformed_source_cameras) >= 2:
+        for i in range(len(transformed_source_cameras) - 1):
+            p1 = transformed_source_cameras[i]
+            p2 = transformed_source_cameras[i+1]
+            
+            # Create a cylinder between consecutive camera positions
+            direction = p2 - p1
+            length = np.linalg.norm(direction)
+            if length > 0:  # Avoid zero-length cylinders
+                # Create a cylinder
+                radius = 0.01  # Cylinder radius
+                center = (p1 + p2) / 2
+                
+                # Calculate rotation to align cylinder with direction
+                direction_norm = direction / length
+                z_axis = np.array([0, 0, 1])
+                
+                if np.allclose(direction_norm, z_axis) or np.allclose(direction_norm, -z_axis):
+                    rotation = np.eye(3)
+                else:
+                    # Find rotation from z-axis to direction
+                    cross = np.cross(z_axis, direction_norm)
+                    sin_angle = np.linalg.norm(cross)
+                    cos_angle = np.dot(z_axis, direction_norm)
+                    
+                    # Skew-symmetric cross-product matrix
+                    K = np.array([[0, -cross[2], cross[1]],
+                                [cross[2], 0, -cross[0]],
+                                [-cross[1], cross[0], 0]])
+                    
+                    # Rodrigues formula
+                    if sin_angle > 0:
+                        rotation = np.eye(3) + K + K @ K * (1 - cos_angle) / (sin_angle ** 2)
+                    else:
+                        rotation = np.eye(3)
+                
+                # Create cylinder
+                transform = np.eye(4)
+                transform[:3, :3] = rotation
+                transform[:3, 3] = center
+                
+                cylinder = trimesh.creation.cylinder(radius=radius, height=length)
+                cylinder.apply_transform(transform)
+                cylinder.visual.face_colors = [255, 0, 0, 100]  # Red, semi-transparent
+                scene.add_geometry(cylinder)
+    
+    # Target trajectory (green)
+    if len(target_cameras) >= 2:
+        for i in range(len(target_cameras) - 1):
+            p1 = target_cameras[i]
+            p2 = target_cameras[i+1]
+            
+            direction = p2 - p1
+            length = np.linalg.norm(direction)
+            if length > 0:
+                radius = 0.01
+                center = (p1 + p2) / 2
+                
+                direction_norm = direction / length
+                z_axis = np.array([0, 0, 1])
+                
+                if np.allclose(direction_norm, z_axis) or np.allclose(direction_norm, -z_axis):
+                    rotation = np.eye(3)
+                else:
+                    cross = np.cross(z_axis, direction_norm)
+                    sin_angle = np.linalg.norm(cross)
+                    cos_angle = np.dot(z_axis, direction_norm)
+                    
+                    K = np.array([[0, -cross[2], cross[1]],
+                                [cross[2], 0, -cross[0]],
+                                [-cross[1], cross[0], 0]])
+                    
+                    if sin_angle > 0:
+                        rotation = np.eye(3) + K + K @ K * (1 - cos_angle) / (sin_angle ** 2)
+                    else:
+                        rotation = np.eye(3)
+                
+                transform = np.eye(4)
+                transform[:3, :3] = rotation
+                transform[:3, 3] = center
+                
+                cylinder = trimesh.creation.cylinder(radius=radius, height=length)
+                cylinder.apply_transform(transform)
+                cylinder.visual.face_colors = [0, 255, 0, 100]  # Green, semi-transparent
+                scene.add_geometry(cylinder)
+    
+    # Export the scene
+    scene.export(output_path)
+    print(f"Registration visualization saved to {output_path}")
+    
+    return scene
+
 def create_overlapping_batches(image_paths, batch_size=16, overlap_size=8):
     """
     Create overlapping batches of sequential images
@@ -142,7 +383,7 @@ def process_image_batch(image_batch, model, batch_id, output_dir):
     glb_path = os.path.join(batch_dir, "scene.glb")
     glbscene = predictions_to_glb(
         predictions, 
-        conf_thres=90.0,
+        conf_thres=50.0,
         filter_by_frames="All",
         mask_black_bg=True,
         mask_white_bg=True,
@@ -268,92 +509,68 @@ def find_overlapping_cameras(batch1_cameras, batch2_cameras, batch1_images, batc
 
 
 def register_consecutive_point_clouds(source_pcd, target_pcd, source_cameras, target_cameras, 
-                                     source_images, target_images):
+                                     source_images, target_images, output_dir=None, batch_id=None):
     """
-    Register two point clouds from consecutive batches using both overlapping cameras
-    and point cloud features
-    
-    Returns:
-        Transformation matrix to align source to target
+    Register two point clouds from consecutive batches with improved initialization
     """
     print("Registering consecutive point clouds...")
     
-    # 1. Find overlapping cameras
-    source_overlap_idx, target_overlap_idx = find_overlapping_cameras(
+    # 1. Better initialization using camera poses
+    initial_transformation, source_overlap_idx, target_overlap_idx = improve_camera_based_initialization(
         source_cameras, target_cameras, source_images, target_images
     )
     
-    if len(source_overlap_idx) < 2:
-        print("Warning: Less than 2 overlapping cameras found, alignment may be inaccurate")
-        # Fall back to using all cameras if not enough overlap
-        source_pts = source_cameras
-        target_pts = target_cameras[:len(source_pts)] if len(target_cameras) > len(source_pts) else target_cameras
-    else:
-        # Use overlapping cameras for initial alignment
-        source_pts = source_cameras[source_overlap_idx]
-        target_pts = target_cameras[target_overlap_idx]
+    # 2. Visualize pre-registration alignment
+    if output_dir is not None and batch_id is not None:
+        pre_reg_path = os.path.join(output_dir, f"pre_registration_batch_{batch_id}.glb")
+        visualize_registration_overlap(
+            source_pcd, target_pcd, source_cameras, target_cameras,
+            source_overlap_idx, target_overlap_idx, initial_transformation, pre_reg_path
+        )
     
-    print(f"Found {len(source_overlap_idx)} overlapping cameras for alignment")
-    
-    # 2. Initial alignment using camera positions
-    # Calculate centroids
-    source_centroid = np.mean(source_pts, axis=0)
-    target_centroid = np.mean(target_pts, axis=0)
-    
-    # Center the points
-    source_centered = source_pts - source_centroid
-    target_centered = target_pts - target_centroid
-    
-    # Compute rotation using SVD
-    H = np.dot(source_centered.T, target_centered)
-    U, _, Vt = np.linalg.svd(H)
-    R = np.dot(Vt.T, U.T)
-    
-    # Ensure proper rotation matrix (det=1)
-    if np.linalg.det(R) < 0:
-        Vt[-1, :] *= -1
-        R = np.dot(Vt.T, U.T)
-    
-    # Translation
-    t = target_centroid - np.dot(R, source_centroid)
-    
-    # Initial transformation matrix
-    initial_transformation = np.eye(4)
-    initial_transformation[:3, :3] = R
-    initial_transformation[:3, 3] = t
-    
-    # 3. Apply initial transformation to source point cloud
+    # 3. Apply initial transformation and proceed with ICP refinement
     source_aligned = copy.deepcopy(source_pcd)
     source_aligned.transform(initial_transformation)
     
-    # 4. Refine alignment with Colored ICP
-    # Prepare for colored ICP
+    # Prepare for ICP
     source_aligned.estimate_normals()
     target_pcd.estimate_normals()
     
-    # Run Colored ICP
-    print("Running colored ICP for fine alignment...")
-    reg_p2p = o3d.pipelines.registration.registration_colored_icp(
-        source_aligned, target_pcd, 0.05, 
-        initial_transformation,
-        o3d.pipelines.registration.TransformationEstimationForColoredICP(),
-        o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
-    )
+    # Try different refinement methods
+    try:
+        print("Running colored ICP for fine alignment...")
+        reg_p2p = o3d.pipelines.registration.registration_colored_icp(
+            source_aligned, target_pcd, 0.05, 
+            np.eye(4),  # Start from current alignment
+            o3d.pipelines.registration.TransformationEstimationForColoredICP(),
+            o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
+        )
+        print(f"ICP fitness: {reg_p2p.fitness}, RMSE: {reg_p2p.inlier_rmse}")
+        
+        # Only use ICP refinement if it significantly improves the alignment
+        if reg_p2p.fitness > 0.3:  # Adjust threshold as needed
+            final_transformation = reg_p2p.transformation @ initial_transformation
+        else:
+            print("ICP did not improve alignment significantly, using initial transformation")
+            final_transformation = initial_transformation
+    except Exception as e:
+        print(f"ICP refinement failed: {str(e)}")
+        final_transformation = initial_transformation
     
-    # Final transformation matrix (combines initial and refinement)
-    final_transformation = reg_p2p.transformation @ initial_transformation
-    
-    print(f"Registration complete with fitness: {reg_p2p.fitness}, RMSE: {reg_p2p.inlier_rmse}")
+    # 4. Visualize post-registration alignment
+    if output_dir is not None and batch_id is not None:
+        post_reg_path = os.path.join(output_dir, f"post_registration_batch_{batch_id}.glb")
+        visualize_registration_overlap(
+            source_pcd, target_pcd, source_cameras, target_cameras,
+            source_overlap_idx, target_overlap_idx, final_transformation, post_reg_path
+        )
     
     return final_transformation
 
 
-def register_all_point_clouds(batch_results, voxel_size=0.02):
+def register_all_point_clouds(batch_results, output_dir, voxel_size=0.02):
     """
-    Register all point clouds from overlapping batches
-    
-    Returns:
-        List of transformation matrices and list of point clouds
+    Register all point clouds with better initialization and visualization
     """
     point_clouds = []
     camera_positions = []
@@ -363,7 +580,7 @@ def register_all_point_clouds(batch_results, voxel_size=0.02):
     for batch_result in batch_results:
         predictions = batch_result["predictions"]
         pcd, cameras = extract_point_cloud_from_predictions(
-            predictions, conf_threshold=50.0, voxel_size=voxel_size, mask_bg=True
+            predictions, conf_threshold=30.0, voxel_size=voxel_size, mask_bg=True
         )
         point_clouds.append(pcd)
         camera_positions.append(cameras)
@@ -377,25 +594,24 @@ def register_all_point_clouds(batch_results, voxel_size=0.02):
         source_images = batch_results[i]["image_paths"]
         target_images = batch_results[i-1]["image_paths"]
         
+        # Pass both output_dir and batch_id
         transformation = register_consecutive_point_clouds(
             source_pcd, target_pcd, source_cameras, target_cameras,
-            source_images, target_images
+            source_images, target_images, output_dir, i
         )
         
         transformations.append(transformation)
     
-    # Apply transformations to point clouds
+    # Apply transformations to align all point clouds
     aligned_point_clouds = [point_clouds[0]]  # First cloud is reference
     
-    # Forward transformations - transform each cloud to first cloud's reference frame
     for i in range(1, len(point_clouds)):
-        # Initialize with identity transformation
+        # Calculate cumulative transformation
         cumulative_transform = np.eye(4)
-        
-        # Compose transformations from current cloud back to the first cloud
         for j in range(i-1, -1, -1):
             cumulative_transform = transformations[j] @ cumulative_transform
         
+        # Apply transformation
         transformed_pcd = copy.deepcopy(point_clouds[i])
         transformed_pcd.transform(cumulative_transform)
         aligned_point_clouds.append(transformed_pcd)
@@ -487,8 +703,9 @@ def reconstruct_from_images_with_overlap(image_dir, output_path, batch_size=8, o
         predictions = dict(np.load(result["npz_path"], allow_pickle=True))
         batch_results[i]["predictions"] = predictions
     
-    # Register point clouds
-    aligned_point_clouds, transformations = register_all_point_clouds(batch_results, voxel_size)
+    # Register point clouds - FIXED LINE BELOW
+    aligned_point_clouds, transformations = register_all_point_clouds(batch_results, output_dir, voxel_size)
+    # Register point cloud
     
     # Merge point clouds
     merged_cloud = merge_aligned_point_clouds(aligned_point_clouds, voxel_size)
@@ -540,15 +757,15 @@ def main():
         help="Output GLB file path for the merged scene"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=30,
+        "--batch_size", type=int, default=28,
         help="Number of images per batch"
     )
     parser.add_argument(
-        "--overlap_size", type=int, default=20,
+        "--overlap_size", type=int, default=16,
         help="Number of overlapping images between consecutive batches"
     )
     parser.add_argument(
-        "--conf_threshold", type=float, default=90.0, 
+        "--conf_threshold", type=float, default=20.0, 
         help="Confidence threshold percentage for filtering points (0-100)"
     )
     parser.add_argument(

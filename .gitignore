@@ -11,6 +11,7 @@ reconstructions/
 # C extensions
 *.so
 
+output_colmap*
 # Distribution / packaging
 .Python
 build/
