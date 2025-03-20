@@ -7,11 +7,9 @@ __pycache__/
 **/__pycache__/
 *.py[cod]
 *$py.class
-reconstructions/
 # C extensions
 *.so
 
-output_colmap*
 # Distribution / packaging
 .Python
 build/
