@@ -68,8 +68,10 @@ def run_model(target_dir, model) -> dict:
 
     # Run inference
     print("Running inference...")
+    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+
     with torch.no_grad():
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+        with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
 
     # Convert pose encoding to extrinsic and intrinsic matrices
@@ -217,7 +219,7 @@ def gradio_demo(
     # Handle None frame_filter
     if frame_filter is None:
         frame_filter = "All"
-        
+
     # Build a GLB file name
     glbfile = os.path.join(
         target_dir,
@@ -244,7 +246,7 @@ def gradio_demo(
     torch.cuda.empty_cache()
 
     end_time = time.time()
-    print(f"Total time: {end_time - start_time:.2f} seconds")
+    print(f"Total time: {end_time - start_time:.2f} seconds (including IO)")
     log_msg = f"Reconstruction Success ({len(all_files)} frames). Waiting for visualization."
 
     return glbfile, log_msg, gr.Dropdown(choices=frame_filter_choices, value=frame_filter, interactive=True)
@@ -379,9 +381,9 @@ with gr.Blocks(
     # Instead of gr.State, we use a hidden Textbox:
     is_example = gr.Textbox(label="is_example", visible=False, value="None")
     num_images = gr.Textbox(label="num_images", visible=False, value="None")
-    
+
     gr.HTML(
-    """
+        """
     <h1>🏛️ VGGT: Visual Geometry Grounded Transformer</h1>
     <p>
     <a href="https://github.com/facebookresearch/vggt">🐙 GitHub Repository</a> |
@@ -542,7 +544,16 @@ with gr.Blocks(
         fn=update_log, inputs=[], outputs=[log_output]
     ).then(
         fn=gradio_demo,
-        inputs=[target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode],
+        inputs=[
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+        ],
         outputs=[reconstruction_output, log_output, frame_filter],
     ).then(
         fn=lambda: "False", inputs=[], outputs=[is_example]  # set is_example to "False"
@@ -553,37 +564,107 @@ with gr.Blocks(
     # -------------------------------------------------------------------------
     conf_thres.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     frame_filter.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     mask_black_bg.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     mask_white_bg.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     show_cam.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     mask_sky.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
     prediction_mode.change(
         update_visualization,
-        [target_dir_output, conf_thres, frame_filter, mask_black_bg, mask_white_bg, show_cam, mask_sky, prediction_mode, is_example],
+        [
+            target_dir_output,
+            conf_thres,
+            frame_filter,
+            mask_black_bg,
+            mask_white_bg,
+            show_cam,
+            mask_sky,
+            prediction_mode,
+            is_example,
+        ],
         [reconstruction_output, log_output],
     )
 

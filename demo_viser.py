@@ -30,6 +30,7 @@ from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.utils.geometry import closed_form_inverse_se3, unproject_depth_map_to_point_map
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
+
 def viser_wrapper(
     pred_dict: dict,
     port: int = 8080,
@@ -214,9 +215,9 @@ def viser_wrapper(
         # Here we compute the threshold value based on the current percentage
         current_percentage = gui_points_conf.value
         threshold_val = np.percentile(conf_flat, current_percentage)
-        
+
         print(f"Threshold absolute value: {threshold_val}, percentage: {current_percentage}%")
-        
+
         conf_mask = (conf_flat >= threshold_val) & (conf_flat > 1e-5)
 
         if gui_frame_selector.value == "All":
@@ -280,49 +281,42 @@ def apply_sky_segmentation(conf: np.ndarray, image_folder: str) -> np.ndarray:
         np.ndarray: Updated confidence scores with sky regions masked out
     """
     S, H, W = conf.shape
-    sky_masks_dir = image_folder.rstrip('/') + "_sky_masks"
+    sky_masks_dir = image_folder.rstrip("/") + "_sky_masks"
     os.makedirs(sky_masks_dir, exist_ok=True)
-    
+
     # Download skyseg.onnx if it doesn't exist
     if not os.path.exists("skyseg.onnx"):
         print("Downloading skyseg.onnx...")
-        download_file_from_url(
-            "https://huggingface.co/JianyuanWang/skyseg/resolve/main/skyseg.onnx", "skyseg.onnx"
-        )
-    
-    skyseg_session = onnxruntime.InferenceSession("skyseg.onnx")        
+        download_file_from_url("https://huggingface.co/JianyuanWang/skyseg/resolve/main/skyseg.onnx", "skyseg.onnx")
+
+    skyseg_session = onnxruntime.InferenceSession("skyseg.onnx")
     image_files = sorted(glob.glob(os.path.join(image_folder, "*")))
     sky_mask_list = []
-    
+
     print("Generating sky masks...")
     for i, image_path in enumerate(tqdm(image_files[:S])):  # Limit to the number of images in the batch
         image_name = os.path.basename(image_path)
         mask_filepath = os.path.join(sky_masks_dir, image_name)
-        
+
         if os.path.exists(mask_filepath):
             sky_mask = cv2.imread(mask_filepath, cv2.IMREAD_GRAYSCALE)
         else:
             sky_mask = segment_sky(image_path, skyseg_session, mask_filepath)
-        
+
         # Resize mask to match H×W if needed
         if sky_mask.shape[0] != H or sky_mask.shape[1] != W:
             sky_mask = cv2.resize(sky_mask, (W, H))
-        
+
         sky_mask_list.append(sky_mask)
-        
-        
+
     # Convert list to numpy array with shape S×H×W
     sky_mask_array = np.array(sky_mask_list)
     # Apply sky mask to confidence scores
     sky_mask_binary = (sky_mask_array > 0.1).astype(np.float32)
     conf = conf * sky_mask_binary
-    
+
     print("Sky segmentation applied successfully")
     return conf
-
-
-
-
 
 
 parser = argparse.ArgumentParser(description="VGGT demo with viser for 3D visualization")
@@ -341,14 +335,14 @@ parser.add_argument("--mask_sky", action="store_true", help="Apply sky segmentat
 def main():
     """
     Main function for the VGGT demo with viser for 3D visualization.
-    
+
     This function:
     1. Loads the VGGT model
     2. Processes input images from the specified folder
     3. Runs inference to generate 3D points and camera poses
     4. Optionally applies sky segmentation to filter out sky points
     5. Visualizes the results using viser
-    
+
     Command-line arguments:
     --image_folder: Path to folder containing input images
     --use_point_map: Use point map instead of depth-based points
@@ -363,7 +357,7 @@ def main():
 
     print("Initializing and loading VGGT model...")
     # model = VGGT.from_pretrained("facebook/VGGT-1B")
-    
+
     model = VGGT()
     _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
     model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
@@ -379,9 +373,11 @@ def main():
     images = load_and_preprocess_images(image_names).to(device)
     print(f"Preprocessed images shape: {images.shape}")
 
-    print("Running inference...")
+    print("Running inference...")    
+    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+
     with torch.no_grad():
-        with torch.cuda.amp.autocast(dtype=torch.bfloat16):
+        with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
 
     print("Converting pose encoding to extrinsic and intrinsic matrices...")

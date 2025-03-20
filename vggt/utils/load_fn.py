@@ -44,9 +44,9 @@ def load_and_preprocess_images(image_path_list):
         img = Image.open(image_path)
 
         # If there's an alpha channel, blend onto white background:
-        if img.mode == 'RGBA':
+        if img.mode == "RGBA":
             # Create white background
-            background = Image.new('RGBA', img.size, (255, 255, 255, 255))
+            background = Image.new("RGBA", img.size, (255, 255, 255, 255))
             # Alpha composite onto the white background
             img = Image.alpha_composite(background, img)
 

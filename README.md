@@ -47,7 +47,8 @@ from vggt.models.vggt import VGGT
 from vggt.utils.load_fn import load_and_preprocess_images
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-dtype = torch.bfloat16  # or torch.float16
+# bfloat16 is supported on Ampere GPUs (Compute Capability 8.0+) 
+dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
 # Initialize the model and load the pretrained weights.
 # This will automatically download the model weights the first time it's run, which may take a while.
@@ -57,9 +58,10 @@ model = VGGT.from_pretrained("facebook/VGGT-1B").to(device)
 image_names = ["path/to/imageA.png", "path/to/imageB.png", "path/to/imageC.png"]  
 images = load_and_preprocess_images(image_names).to(device)
 
-with torch.no_grad() and torch.cuda.amp.autocast(dtype=dtype):
-    # Predict attributes including cameras, depth maps, and point maps.
-    predictions = model(images)
+with torch.no_grad():
+    with torch.cuda.amp.autocast(dtype=dtype):
+        # Predict attributes including cameras, depth maps, and point maps.
+        predictions = model(images)
 ```
 
 The model weights will be automatically downloaded from Hugging Face. If you encounter issues such as slow loading, you can manually download them [here](https://huggingface.co/facebook/VGGT-1B/blob/main/model.pt) and load, or:
@@ -163,6 +165,10 @@ This plots the tracks on the images and saves them to the specified output direc
 ## Single-view Reconstruction
 
 Our model shows surprisingly good performance on single-view reconstruction, although it was never trained for this task. The model does not need to duplicate the single-view image to a pair, instead, it can directly infer the 3D structure from the tokens of the single view image. Feel free to try it with our demos above, which naturally works for single-view reconstruction.
+
+
+We did not quantitatively test monocular depth estimation performance ourselves, but [@kabouzeid](https://github.com/kabouzeid) generously provided a comparison of VGGT to recent methods [here](https://github.com/facebookresearch/vggt/issues/36). VGGT shows competitive or better results compared to state-of-the-art monocular approaches such as DepthAnything v2 or MoGe, despite never being explicitly trained for single-view tasks. 
+
 
 
 ## Runtime and GPU Memory

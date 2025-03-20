@@ -206,7 +206,7 @@ class DPTHead(nn.Module):
             Tensor or Tuple[Tensor, Tensor]: Feature maps or (predictions, confidence).
         """
         if frames_start_idx is not None and frames_end_idx is not None:
-            images = images[:, frames_start_idx:frames_end_idx]
+            images = images[:, frames_start_idx:frames_end_idx].contiguous()
 
         B, S, _, H, W = images.shape
 
