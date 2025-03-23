@@ -38,27 +38,7 @@ cd vggt
 pip install -r requirements.txt
 ```
 
-<details>
-<summary>Alternatively, assuming torch and torchvision have been installed, you can use pip, pixi or uv to <b>install VGGT as a package (Click to expand)</b></summary>
-
-### Install with pip
-
-```bash
-pip install -e .
-```
-### Install and run with pixi
-Download [pixi here](https://pixi.sh)
-
-```bash
-pixi run -e python demo_gradio.py
-```
-
-### Install and run with uv
-Download [uv here](https://docs.astral.sh/uv/getting-started/installation/)
-```bash
-uv run --extra demo demo_gradio.py
-```
-</details>
+Alternatively, you can <b>install VGGT as a package</b>. <a href="docs/installation.md">Click here</a> for details.
 
 
 Now, try the model with just a few lines of code:
