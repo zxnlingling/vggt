@@ -35,12 +35,17 @@ First, clone this repository to your local machine, and install the dependencies
 ```bash
 git clone git@github.com:facebookresearch/vggt.git 
 cd vggt
+pip install -r requirements.txt
 ```
+
+<details>
+<summary>Alternatively, you can install VGGT as a package via pip, pixi or uv (Click to expand)</summary>
+
 ### Install with pip
+
 ```bash
 pip install -e .
 ```
-
 ### Install and run with pixi
 Download [pixi here](https://pixi.sh)
 
@@ -53,6 +58,8 @@ Download [uv here](https://docs.astral.sh/uv/getting-started/installation/)
 ```bash
 uv run --extra demo demo_gradio.py
 ```
+</details>
+
 
 Now, try the model with just a few lines of code:
 
