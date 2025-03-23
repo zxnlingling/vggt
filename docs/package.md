@@ -7,6 +7,7 @@ This document explains how to install VGGT as a package using different package 
 Before installing VGGT as a package, you need to install PyTorch and torchvision. We don't list these as dependencies to avoid CUDA version mismatches. Install them first, with an example as:
 
 ```bash
+# install pytorch 2.3.1 with cuda 12.1
 pip install torch==2.3.1 torchvision==0.18.1 --index-url https://download.pytorch.org/whl/cu121
 ```
 
