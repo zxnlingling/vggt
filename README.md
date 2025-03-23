@@ -39,7 +39,7 @@ pip install -r requirements.txt
 ```
 
 <details>
-<summary>Alternatively, you can install VGGT as a package via pip, pixi or uv (Click to expand)</summary>
+<summary>Alternatively, assuming torch and torchvision have been installed, you can use pip, pixi or uv to <b>install VGGT as a package (Click to expand)</b></summary>
 
 ### Install with pip
 

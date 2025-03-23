@@ -6,6 +6,7 @@ dependencies = [
     "huggingface_hub",
     "einops",
     "safetensors",
+    "opencv-python",
 ]
 name = "vggt"
 requires-python = ">= 3.8"
