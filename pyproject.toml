@@ -33,8 +33,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 # setuptools configuration
-[tool.setuptools]
-packages = ["vggt*"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vggt*"]
 
 # Pixi configuration
 [tool.pixi.workspace]
