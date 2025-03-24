@@ -34,7 +34,7 @@ build-backend = "setuptools.build_meta"
 
 # setuptools configuration
 [tool.setuptools]
-packages = ["vggt"]
+packages = ["vggt*"]
 
 # Pixi configuration
 [tool.pixi.workspace]
