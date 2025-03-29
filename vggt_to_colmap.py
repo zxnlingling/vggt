@@ -24,9 +24,7 @@ def load_model(device=None):
         device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
     
-    model = VGGT()
-    _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+    model = VGGT.from_pretrained("facebook/VGGT-1B")
     
     model.eval()
     model = model.to(device)
@@ -78,7 +76,18 @@ def process_images(image_dir, model, device):
     
     # Store original images for color extraction
     predictions["original_images"] = original_images
-    predictions["images"] = np.array(original_images) / 255.0  # Add normalized images as in original code
+    
+    # Create normalized images array with the same shape as world_points_from_depth
+    S, H, W = world_points.shape[:3]
+    normalized_images = np.zeros((S, H, W, 3), dtype=np.float32)
+    
+    for i, img in enumerate(original_images):
+        # Resize original image to match the depth map dimensions
+        resized_img = cv2.resize(img, (W, H))
+        # Normalize to 0-1 range
+        normalized_images[i] = resized_img / 255.0
+    
+    predictions["images"] = normalized_images
     
     return predictions, image_names
 
@@ -187,6 +196,9 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
     Filter points based on confidence and prepare for COLMAP format.
     Implementation matches the conventions in the original VGGT code.
     """
+    # Debug array shapes
+    print("Debug: Checking array shapes before processing...")
+    
     # Use the correct point cloud based on prediction mode
     if "Pointmap" in prediction_mode:
         print("Using Pointmap Branch")
@@ -204,6 +216,23 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
     
     # Get images for color extraction
     colors_rgb = predictions["images"]  # Already in normalized format (0-1)
+    
+    # Debug array shapes
+    print(f"Shape of pred_world_points: {pred_world_points.shape}")
+    print(f"Shape of pred_world_points_conf: {pred_world_points_conf.shape}")
+    print(f"Shape of colors_rgb: {colors_rgb.shape}")
+    
+    # Make sure arrays have compatible shapes
+    S, H, W = pred_world_points.shape[:3]
+    if colors_rgb.shape[:3] != (S, H, W):
+        print(f"Reshaping colors_rgb from {colors_rgb.shape} to match {(S, H, W, 3)}")
+        reshaped_colors = np.zeros((S, H, W, 3), dtype=np.float32)
+        for i in range(S):
+            if i < len(colors_rgb):
+                reshaped_colors[i] = cv2.resize(colors_rgb[i], (W, H))
+        colors_rgb = reshaped_colors
+    
+    # Convert to 8-bit color
     colors_rgb = (colors_rgb * 255).astype(np.uint8)
     
     # Handle sky segmentation if requested
@@ -240,7 +269,6 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
                     mask_sky = False
             
             if mask_sky:  # Continue only if download succeeded
-                S, H, W = pred_world_points_conf.shape
                 sky_mask_list = []
                 
                 for i, image_name in enumerate(image_list):
@@ -269,16 +297,29 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
                 # Apply sky mask to confidence scores
                 sky_mask_binary = (sky_mask_array > 0.1).astype(np.float32)
                 pred_world_points_conf = pred_world_points_conf * sky_mask_binary
+                print(f"Applied sky mask, shape: {sky_mask_binary.shape}")
                 
         except (ImportError, Exception) as e:
             print(f"Error in sky segmentation: {e}")
             print("Falling back to basic sky filtering")
             mask_sky = False
     
-    # Reshape for processing
+    # Reshape for processing - make sure dimensions match!
     vertices_3d = pred_world_points.reshape(-1, 3)
     conf = pred_world_points_conf.reshape(-1)
     colors_rgb_flat = colors_rgb.reshape(-1, 3)
+    
+    # Verify shapes match for indexing
+    print(f"Vertices shape: {vertices_3d.shape}, Conf shape: {conf.shape}, Colors shape: {colors_rgb_flat.shape}")
+    
+    # Ensure shapes match - critical for boolean indexing
+    if len(conf) != len(colors_rgb_flat):
+        print(f"WARNING: Shape mismatch between confidence ({len(conf)}) and colors ({len(colors_rgb_flat)})")
+        # Use the smaller size to avoid index errors
+        min_size = min(len(conf), len(colors_rgb_flat))
+        conf = conf[:min_size]
+        vertices_3d = vertices_3d[:min_size]
+        colors_rgb_flat = colors_rgb_flat[:min_size]
     
     # Apply confidence threshold exactly as in original code
     if conf_threshold == 0.0:
@@ -318,50 +359,62 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
     point_indices = {}
     image_points2D = [[] for _ in range(len(pred_world_points))]
     
-    # Get the original 3D indices from the flat indices
-    S, H, W = pred_world_points.shape[0:3]
-    flat_indices = np.where(conf_mask)[0]
+    # Since we can't easily map back to original indices after filtering,
+    # let's iterate through the original arrays and use the filtering criteria directly
+    print(f"Preparing points for COLMAP format with stride {stride}...")
     
-    for flat_idx in flat_indices[::stride]:  # Use stride to reduce point count
-        # Convert flat index back to 3D coordinates
-        img_idx = flat_idx // (H * W)
-        remainder = flat_idx % (H * W)
-        y = remainder // W
-        x = remainder % W
-        
-        if img_idx >= S:  # Handle edge cases
-            continue
-            
-        point3D = vertices_3d[flat_idx]
-        rgb = filtered_colors[flat_idx - flat_indices[0]] if flat_idx >= flat_indices[0] else filtered_colors[0]
-        
-        # Skip invalid points
-        if not np.all(np.isfinite(point3D)):
-            continue
-        
-        # Generate a hash for this point to identify duplicates
-        point_hash = hash_point(point3D, scale=100)
-        
-        if point_hash not in point_indices:
-            # Create new point
-            point_idx = len(points3D)
-            point_indices[point_hash] = point_idx
-            
-            point_entry = {
-                "id": point_idx,
-                "xyz": point3D,
-                "rgb": rgb,
-                "error": 1.0,
-                "track": [(img_idx, len(image_points2D[img_idx]))]
-            }
-            points3D.append(point_entry)
-        else:
-            # Update existing point's track
-            point_idx = point_indices[point_hash]
-            points3D[point_idx]["track"].append((img_idx, len(image_points2D[img_idx])))
-        
-        # Add 2D point to image
-        image_points2D[img_idx].append((x, y, point_indices[point_hash]))
+    total_points = 0
+    for img_idx in range(S):
+        for y in range(0, H, stride):
+            for x in range(0, W, stride):
+                flat_idx = img_idx * H * W + y * W + x
+                
+                # Skip if out of range
+                if flat_idx >= len(conf):
+                    continue
+                
+                # Apply the same filtering criteria
+                if conf[flat_idx] < conf_thres_value or conf[flat_idx] <= 1e-5:
+                    continue
+                
+                # Apply background filters
+                if mask_black_bg and colors_rgb_flat[flat_idx].sum() < 16:
+                    continue
+                
+                if mask_white_bg and all(colors_rgb_flat[flat_idx] > 240):
+                    continue
+                
+                point3D = vertices_3d[flat_idx]
+                rgb = colors_rgb_flat[flat_idx]
+                
+                # Skip invalid points
+                if not np.all(np.isfinite(point3D)):
+                    continue
+                
+                # Generate a hash for this point to identify duplicates
+                point_hash = hash_point(point3D, scale=100)
+                
+                if point_hash not in point_indices:
+                    # Create new point
+                    point_idx = len(points3D)
+                    point_indices[point_hash] = point_idx
+                    
+                    point_entry = {
+                        "id": point_idx,
+                        "xyz": point3D,
+                        "rgb": rgb,
+                        "error": 1.0,
+                        "track": [(img_idx, len(image_points2D[img_idx]))]
+                    }
+                    points3D.append(point_entry)
+                    total_points += 1
+                else:
+                    # Update existing point's track
+                    point_idx = point_indices[point_hash]
+                    points3D[point_idx]["track"].append((img_idx, len(image_points2D[img_idx])))
+                
+                # Add 2D point to image
+                image_points2D[img_idx].append((x, y, point_indices[point_hash]))
     
     print(f"Prepared {len(points3D)} 3D points with {sum(len(pts) for pts in image_points2D)} observations for COLMAP")
     return points3D, image_points2D
@@ -617,4 +670,4 @@ def main():
     print(f"COLMAP files successfully written to {args.output_dir}")
 
 if __name__ == "__main__":
-    main()  
+    main()
