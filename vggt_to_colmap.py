@@ -9,8 +9,8 @@ import sys
 from PIL import Image
 import cv2
 import requests
+import tempfile
 
-# Add VGGT to path
 sys.path.append("vggt/")
 
 from vggt.models.vggt import VGGT
@@ -25,6 +25,10 @@ def load_model(device=None):
     print(f"Using device: {device}")
     
     model = VGGT.from_pretrained("facebook/VGGT-1B")
+
+    # model = VGGT()
+    # _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
+    # model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
     
     model.eval()
     model = model.to(device)
@@ -38,53 +42,43 @@ def process_images(image_dir, model, device):
     
     if len(image_names) == 0:
         raise ValueError(f"No images found in {image_dir}")
-    
-    # Load original images for color extraction
+
     original_images = []
     for img_path in image_names:
         img = Image.open(img_path).convert('RGB')
         original_images.append(np.array(img))
     
-    # Process images with VGGT
     images = load_and_preprocess_images(image_names).to(device)
     print(f"Preprocessed images shape: {images.shape}")
     
-    # Run inference
     print("Running inference...")
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     
     with torch.no_grad():
         with torch.cuda.amp.autocast(dtype=dtype):
             predictions = model(images)
-    
-    # Convert pose encoding to extrinsic and intrinsic matrices
+
     print("Converting pose encoding to camera parameters...")
     extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
     predictions["extrinsic"] = extrinsic
     predictions["intrinsic"] = intrinsic
-    
-    # Convert tensors to numpy
+
     for key in predictions.keys():
         if isinstance(predictions[key], torch.Tensor):
             predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dimension
     
-    # Generate world points from depth map
     print("Computing 3D points from depth maps...")
     depth_map = predictions["depth"]  # (S, H, W, 1)
     world_points = unproject_depth_map_to_point_map(depth_map, predictions["extrinsic"], predictions["intrinsic"])
     predictions["world_points_from_depth"] = world_points
     
-    # Store original images for color extraction
     predictions["original_images"] = original_images
     
-    # Create normalized images array with the same shape as world_points_from_depth
     S, H, W = world_points.shape[:3]
     normalized_images = np.zeros((S, H, W, 3), dtype=np.float32)
     
     for i, img in enumerate(original_images):
-        # Resize original image to match the depth map dimensions
         resized_img = cv2.resize(img, (W, H))
-        # Normalize to 0-1 range
         normalized_images[i] = resized_img / 255.0
     
     predictions["images"] = normalized_images
@@ -116,11 +110,10 @@ def extrinsic_to_colmap_format(extrinsics):
 def download_file_from_url(url, filename):
     """Downloads a file from a URL, handling redirects."""
     try:
-        # Get the redirect URL
         response = requests.get(url, allow_redirects=False)
-        response.raise_for_status()  # Raise HTTPError for bad requests (4xx or 5xx)
+        response.raise_for_status() 
 
-        if response.status_code == 302:  # Expecting a redirect
+        if response.status_code == 302:  
             redirect_url = response.headers["Location"]
             response = requests.get(redirect_url, stream=True)
             response.raise_for_status()
@@ -142,11 +135,9 @@ def segment_sky(image_path, onnx_session, mask_filename=None):
     """
     Segments sky from an image using an ONNX model.
     """
-    assert mask_filename is not None
     image = cv2.imread(image_path)
 
     result_map = run_skyseg(onnx_session, [320, 320], image)
-    # resize the result_map to the original image size
     result_map_original = cv2.resize(result_map, (image.shape[1], image.shape[0]))
 
     # Fix: Invert the mask so that 255 = non-sky, 0 = sky
@@ -154,8 +145,10 @@ def segment_sky(image_path, onnx_session, mask_filename=None):
     output_mask = np.zeros_like(result_map_original)
     output_mask[result_map_original < 32] = 255  # Use threshold of 32
 
-    os.makedirs(os.path.dirname(mask_filename), exist_ok=True)
-    cv2.imwrite(mask_filename, output_mask)
+    if mask_filename is not None:
+        os.makedirs(os.path.dirname(mask_filename), exist_ok=True)
+        cv2.imwrite(mask_filename, output_mask)
+    
     return output_mask
 
 def run_skyseg(onnx_session, input_size, image):
@@ -164,7 +157,6 @@ def run_skyseg(onnx_session, input_size, image):
     """
     import copy
     
-    # Pre process:Resize, BGR->RGB, Transpose, PyTorch standardization, float32 cast
     temp_image = copy.deepcopy(image)
     resize_image = cv2.resize(temp_image, dsize=(input_size[0], input_size[1]))
     x = cv2.cvtColor(resize_image, cv2.COLOR_BGR2RGB)
@@ -175,12 +167,10 @@ def run_skyseg(onnx_session, input_size, image):
     x = x.transpose(2, 0, 1)
     x = x.reshape(-1, 3, input_size[0], input_size[1]).astype("float32")
 
-    # Inference
     input_name = onnx_session.get_inputs()[0].name
     output_name = onnx_session.get_outputs()[0].name
     onnx_result = onnx_session.run([output_name], {input_name: x})
 
-    # Post process
     onnx_result = np.array(onnx_result).squeeze()
     min_value = np.min(onnx_result)
     max_value = np.max(onnx_result)
@@ -191,15 +181,12 @@ def run_skyseg(onnx_session, input_size, image):
     return onnx_result
 
 def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_black_bg=False, 
-                             mask_white_bg=False, stride=4, target_dir=None, prediction_mode="Depthmap and Camera Branch"):
+                             mask_white_bg=False, stride=1, prediction_mode="Depthmap and Camera Branch"):
     """
     Filter points based on confidence and prepare for COLMAP format.
     Implementation matches the conventions in the original VGGT code.
     """
-    # Debug array shapes
-    print("Debug: Checking array shapes before processing...")
     
-    # Use the correct point cloud based on prediction mode
     if "Pointmap" in prediction_mode:
         print("Using Pointmap Branch")
         if "world_points" in predictions:
@@ -213,16 +200,9 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
         print("Using Depthmap and Camera Branch")
         pred_world_points = predictions["world_points_from_depth"]
         pred_world_points_conf = predictions.get("depth_conf", np.ones_like(pred_world_points[..., 0]))
+
+    colors_rgb = predictions["images"] 
     
-    # Get images for color extraction
-    colors_rgb = predictions["images"]  # Already in normalized format (0-1)
-    
-    # Debug array shapes
-    print(f"Shape of pred_world_points: {pred_world_points.shape}")
-    print(f"Shape of pred_world_points_conf: {pred_world_points_conf.shape}")
-    print(f"Shape of colors_rgb: {colors_rgb.shape}")
-    
-    # Make sure arrays have compatible shapes
     S, H, W = pred_world_points.shape[:3]
     if colors_rgb.shape[:3] != (S, H, W):
         print(f"Reshaping colors_rgb from {colors_rgb.shape} to match {(S, H, W, 3)}")
@@ -232,96 +212,78 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
                 reshaped_colors[i] = cv2.resize(colors_rgb[i], (W, H))
         colors_rgb = reshaped_colors
     
-    # Convert to 8-bit color
     colors_rgb = (colors_rgb * 255).astype(np.uint8)
     
-    # Handle sky segmentation if requested
-    if mask_sky and target_dir is not None:
+    if mask_sky:
         print("Applying sky segmentation mask")
         try:
             import onnxruntime
-            
-            skyseg_session = None
-            target_dir_images = os.path.join(target_dir, "images")
-            os.makedirs(target_dir_images, exist_ok=True)
-            
-            # Save the RGB images temporarily if they don't exist
-            image_list = []
-            for i, img in enumerate(colors_rgb):
-                img_path = os.path.join(target_dir_images, f"image_{i:04d}.png")
-                image_list.append(os.path.basename(img_path))
-                if not os.path.exists(img_path):
+         
+            with tempfile.TemporaryDirectory() as temp_dir:
+                print(f"Created temporary directory for sky segmentation: {temp_dir}")
+                temp_images_dir = os.path.join(temp_dir, "images")
+                sky_masks_dir = os.path.join(temp_dir, "sky_masks")
+                os.makedirs(temp_images_dir, exist_ok=True)
+                os.makedirs(sky_masks_dir, exist_ok=True)
+                
+                image_list = []
+                for i, img in enumerate(colors_rgb):
+                    img_path = os.path.join(temp_images_dir, f"image_{i:04d}.png")
+                    image_list.append(img_path)
                     cv2.imwrite(img_path, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-            
-            # Ensure the output directory for masks exists
-            sky_masks_dir = os.path.join(target_dir, "sky_masks")
-            os.makedirs(sky_masks_dir, exist_ok=True)
-            
-            # Download skyseg.onnx if it doesn't exist
-            if not os.path.exists("skyseg.onnx"):
-                print("Downloading skyseg.onnx...")
-                download_success = download_file_from_url(
-                    "https://huggingface.co/JianyuanWang/skyseg/resolve/main/skyseg.onnx", 
-                    "skyseg.onnx"
-                )
-                if not download_success:
-                    print("Failed to download skyseg model, skipping sky filtering")
-                    mask_sky = False
-            
-            if mask_sky:  # Continue only if download succeeded
-                sky_mask_list = []
                 
-                for i, image_name in enumerate(image_list):
-                    image_filepath = os.path.join(target_dir_images, image_name)
-                    mask_filepath = os.path.join(sky_masks_dir, image_name)
-                    
-                    # Check if mask already exists
-                    if os.path.exists(mask_filepath):
-                        # Load existing mask
-                        sky_mask = cv2.imread(mask_filepath, cv2.IMREAD_GRAYSCALE)
-                    else:
-                        # Generate new mask
-                        if skyseg_session is None:
-                            skyseg_session = onnxruntime.InferenceSession("skyseg.onnx")
-                        sky_mask = segment_sky(image_filepath, skyseg_session, mask_filepath)
-                    
-                    # Resize mask to match H×W if needed
-                    if sky_mask.shape[0] != H or sky_mask.shape[1] != W:
-                        sky_mask = cv2.resize(sky_mask, (W, H))
-                    
-                    sky_mask_list.append(sky_mask)
+           
+                skyseg_path = os.path.join(temp_dir, "skyseg.onnx")
+                if not os.path.exists("skyseg.onnx"): 
+                    print("Downloading skyseg.onnx...")
+                    download_success = download_file_from_url(
+                        "https://huggingface.co/JianyuanWang/skyseg/resolve/main/skyseg.onnx", 
+                        skyseg_path
+                    )
+                    if not download_success:
+                        print("Failed to download skyseg model, skipping sky filtering")
+                        mask_sky = False
+                else:
+            
+                    import shutil
+                    shutil.copy("skyseg.onnx", skyseg_path)
                 
-                # Convert list to numpy array with shape S×H×W
-                sky_mask_array = np.array(sky_mask_list)
-                
-                # Apply sky mask to confidence scores
-                sky_mask_binary = (sky_mask_array > 0.1).astype(np.float32)
-                pred_world_points_conf = pred_world_points_conf * sky_mask_binary
-                print(f"Applied sky mask, shape: {sky_mask_binary.shape}")
+                if mask_sky:  
+                    skyseg_session = onnxruntime.InferenceSession(skyseg_path)
+                    sky_mask_list = []
+                    
+                    for img_path in image_list:
+                        mask_path = os.path.join(sky_masks_dir, os.path.basename(img_path))
+                        sky_mask = segment_sky(img_path, skyseg_session, mask_path)
+           
+                        if sky_mask.shape[0] != H or sky_mask.shape[1] != W:
+                            sky_mask = cv2.resize(sky_mask, (W, H))
+                        
+                        sky_mask_list.append(sky_mask)
+                    
+                    sky_mask_array = np.array(sky_mask_list)
+                    
+                    sky_mask_binary = (sky_mask_array > 0.1).astype(np.float32)
+                    pred_world_points_conf = pred_world_points_conf * sky_mask_binary
+                    print(f"Applied sky mask, shape: {sky_mask_binary.shape}")
                 
         except (ImportError, Exception) as e:
             print(f"Error in sky segmentation: {e}")
-            print("Falling back to basic sky filtering")
             mask_sky = False
     
-    # Reshape for processing - make sure dimensions match!
     vertices_3d = pred_world_points.reshape(-1, 3)
     conf = pred_world_points_conf.reshape(-1)
     colors_rgb_flat = colors_rgb.reshape(-1, 3)
+
     
-    # Verify shapes match for indexing
-    print(f"Vertices shape: {vertices_3d.shape}, Conf shape: {conf.shape}, Colors shape: {colors_rgb_flat.shape}")
-    
-    # Ensure shapes match - critical for boolean indexing
+
     if len(conf) != len(colors_rgb_flat):
         print(f"WARNING: Shape mismatch between confidence ({len(conf)}) and colors ({len(colors_rgb_flat)})")
-        # Use the smaller size to avoid index errors
         min_size = min(len(conf), len(colors_rgb_flat))
         conf = conf[:min_size]
         vertices_3d = vertices_3d[:min_size]
         colors_rgb_flat = colors_rgb_flat[:min_size]
     
-    # Apply confidence threshold exactly as in original code
     if conf_threshold == 0.0:
         conf_thres_value = 0.0
     else:
@@ -330,23 +292,19 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
     print(f"Using confidence threshold: {conf_threshold}% (value: {conf_thres_value:.4f})")
     conf_mask = (conf >= conf_thres_value) & (conf > 1e-5)
     
-    # Apply black background filter if requested
     if mask_black_bg:
         print("Filtering black background")
         black_bg_mask = colors_rgb_flat.sum(axis=1) >= 16
         conf_mask = conf_mask & black_bg_mask
     
-    # Apply white background filter if requested
     if mask_white_bg:
         print("Filtering white background")
         white_bg_mask = ~((colors_rgb_flat[:, 0] > 240) & (colors_rgb_flat[:, 1] > 240) & (colors_rgb_flat[:, 2] > 240))
         conf_mask = conf_mask & white_bg_mask
     
-    # Filter points
     filtered_vertices = vertices_3d[conf_mask]
     filtered_colors = colors_rgb_flat[conf_mask]
     
-    # Check if we have any points left
     if len(filtered_vertices) == 0:
         print("Warning: No points remaining after filtering. Using default point.")
         filtered_vertices = np.array([[0, 0, 0]])
@@ -354,13 +312,10 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
     
     print(f"Filtered to {len(filtered_vertices)} points")
     
-    # Now prepare the filtered points for COLMAP format
     points3D = []
     point_indices = {}
     image_points2D = [[] for _ in range(len(pred_world_points))]
     
-    # Since we can't easily map back to original indices after filtering,
-    # let's iterate through the original arrays and use the filtering criteria directly
     print(f"Preparing points for COLMAP format with stride {stride}...")
     
     total_points = 0
@@ -369,15 +324,12 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
             for x in range(0, W, stride):
                 flat_idx = img_idx * H * W + y * W + x
                 
-                # Skip if out of range
                 if flat_idx >= len(conf):
                     continue
                 
-                # Apply the same filtering criteria
                 if conf[flat_idx] < conf_thres_value or conf[flat_idx] <= 1e-5:
                     continue
                 
-                # Apply background filters
                 if mask_black_bg and colors_rgb_flat[flat_idx].sum() < 16:
                     continue
                 
@@ -387,15 +339,12 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
                 point3D = vertices_3d[flat_idx]
                 rgb = colors_rgb_flat[flat_idx]
                 
-                # Skip invalid points
                 if not np.all(np.isfinite(point3D)):
                     continue
                 
-                # Generate a hash for this point to identify duplicates
                 point_hash = hash_point(point3D, scale=100)
                 
                 if point_hash not in point_indices:
-                    # Create new point
                     point_idx = len(points3D)
                     point_indices[point_hash] = point_idx
                     
@@ -409,11 +358,9 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
                     points3D.append(point_entry)
                     total_points += 1
                 else:
-                    # Update existing point's track
                     point_idx = point_indices[point_hash]
                     points3D[point_idx]["track"].append((img_idx, len(image_points2D[img_idx])))
                 
-                # Add 2D point to image
                 image_points2D[img_idx].append((x, y, point_indices[point_hash]))
     
     print(f"Prepared {len(points3D)} 3D points with {sum(len(pts) for pts in image_points2D)} observations for COLMAP")
@@ -421,7 +368,6 @@ def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_
 
 def hash_point(point, scale=100):
     """Create a hash for a 3D point by quantizing coordinates."""
-    # Quantize point coordinates
     quantized = tuple(np.round(point * scale).astype(int))
     return hash(quantized)
 
@@ -434,15 +380,13 @@ def write_colmap_cameras_txt(file_path, intrinsics, image_width, image_height):
         
         for i, intrinsic in enumerate(intrinsics):
             camera_id = i + 1  # COLMAP uses 1-indexed camera IDs
-            model = "PINHOLE"  # Using PINHOLE model
+            model = "PINHOLE" 
             
-            # Extract parameters for PINHOLE model: fx, fy, cx, cy
             fx = intrinsic[0, 0]
             fy = intrinsic[1, 1]
             cx = intrinsic[0, 2]
             cy = intrinsic[1, 2]
             
-            # Write camera parameters
             f.write(f"{camera_id} {model} {image_width} {image_height} {fx} {fy} {cx} {cy}\n")
 
 def write_colmap_images_txt(file_path, quaternions, translations, image_points2D, image_names):
@@ -457,17 +401,14 @@ def write_colmap_images_txt(file_path, quaternions, translations, image_points2D
         f.write(f"# Number of images: {len(quaternions)}, mean observations per image: {avg_points:.1f}\n")
         
         for i in range(len(quaternions)):
-            image_id = i + 1  # COLMAP uses 1-indexed image IDs
-            camera_id = i + 1  # Assuming each image has its own camera
-            
-            # Extract quaternion and translation
+            image_id = i + 1 
+            camera_id = i + 1  
+          
             qw, qx, qy, qz = quaternions[i]
             tx, ty, tz = translations[i]
             
-            # Write image pose
             f.write(f"{image_id} {qw} {qx} {qy} {qz} {tx} {ty} {tz} {camera_id} {os.path.basename(image_names[i])}\n")
             
-            # Write keypoints
             points_line = " ".join([f"{x} {y} {point3d_id+1}" for x, y, point3d_id in image_points2D[i]])
             f.write(f"{points_line}\n")
 
@@ -481,15 +422,13 @@ def write_colmap_points3D_txt(file_path, points3D):
         f.write(f"# Number of points: {len(points3D)}, mean track length: {avg_track_length:.4f}\n")
         
         for point in points3D:
-            point_id = point["id"] + 1  # COLMAP uses 1-indexed point IDs
+            point_id = point["id"] + 1  
             x, y, z = point["xyz"]
             r, g, b = point["rgb"]
             error = point["error"]
             
-            # Convert track to COLMAP format (1-indexed)
             track = " ".join([f"{img_id+1} {point2d_idx}" for img_id, point2d_idx in point["track"]])
             
-            # Write 3D point
             f.write(f"{point_id} {x} {y} {z} {int(r)} {int(g)} {int(b)} {error} {track}\n")
 
 def write_colmap_cameras_bin(file_path, intrinsics, image_width, image_height):
@@ -500,9 +439,8 @@ def write_colmap_cameras_bin(file_path, intrinsics, image_width, image_height):
         
         for i, intrinsic in enumerate(intrinsics):
             camera_id = i + 1
-            model_id = 1  # PINHOLE model = 1
+            model_id = 1 
             
-            # Extract parameters for PINHOLE model: fx, fy, cx, cy
             fx = float(intrinsic[0, 0])
             fy = float(intrinsic[1, 1])
             cx = float(intrinsic[0, 2])
@@ -530,14 +468,10 @@ def write_colmap_images_bin(file_path, quaternions, translations, image_points2D
             image_id = i + 1
             camera_id = i + 1
             
-            # Extract quaternion and translation
             qw, qx, qy, qz = quaternions[i].astype(float)
             tx, ty, tz = translations[i].astype(float)
             
-            # Get image name and convert to bytes
             image_name = os.path.basename(image_names[i]).encode()
-            
-            # Get 2D points for this image
             points = image_points2D[i]
             
             # Image ID (uint32)
@@ -611,24 +545,15 @@ def main():
     
     args = parser.parse_args()
     
-    # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Create temporary directory for processing
-    temp_dir = os.path.join(args.output_dir, "temp")
-    os.makedirs(os.path.join(temp_dir, "images"), exist_ok=True)
-    
-    # Load model
     model, device = load_model()
     
-    # Process images
     predictions, image_names = process_images(args.image_dir, model, device)
     
-    # Extract quaternions and translations
     print("Converting camera parameters to COLMAP format...")
     quaternions, translations = extrinsic_to_colmap_format(predictions["extrinsic"])
     
-    # Filter and prepare points using the original VGGT conventions
     print(f"Filtering points with confidence threshold {args.conf_threshold}% and stride {args.stride}...")
     points3D, image_points2D = filter_and_prepare_points(
         predictions, 
@@ -637,14 +562,11 @@ def main():
         mask_black_bg=args.mask_black_bg,
         mask_white_bg=args.mask_white_bg,
         stride=args.stride,
-        target_dir=temp_dir,
         prediction_mode=args.prediction_mode
     )
     
-    # Get image dimensions
     height, width = predictions["depth"].shape[1:3]
-    
-    # Write COLMAP files
+
     print(f"Writing {'binary' if args.binary else 'text'} COLMAP files to {args.output_dir}...")
     if args.binary:
         write_colmap_cameras_bin(
