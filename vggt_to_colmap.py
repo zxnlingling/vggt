@@ -6,7 +6,7 @@ import glob
 import struct
 from scipy.spatial.transform import Rotation
 import sys
-from PIL import Image  # Add this import for image handling
+from PIL import Image
 
 # Add VGGT to path
 sys.path.append("vggt/")
@@ -21,7 +21,7 @@ def load_model(device=None):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
-
+    
     model = VGGT.from_pretrained("facebook/VGGT-1B")
     
     model.eval()
@@ -99,17 +99,38 @@ def extrinsic_to_colmap_format(extrinsics):
     
     return np.array(quaternions), np.array(translations)
 
-def filter_and_prepare_points(predictions, conf_threshold, stride=4):
+def is_sky_point(point, rgb):
+    """Check if a point is likely to be sky based on position and color."""
+    # Check if point is above horizon (y is up in most 3D coordinates)
+    # and has blue-ish color (more blue than red or green)
+    return (point[1] > 1.0 and  # High up
+            rgb[2] > 1.2 * rgb[0] and  # More blue than red
+            rgb[2] > 1.2 * rgb[1])  # More blue than green
+
+def is_black_bg_point(rgb, threshold=30):
+    """Check if a point is likely a black background pixel."""
+    # Check if all RGB values are very low
+    return np.mean(rgb) < threshold
+
+def is_white_bg_point(rgb, threshold=230):
+    """Check if a point is likely a white background pixel."""
+    # Check if all RGB values are very high
+    return np.mean(rgb) > threshold and np.std(rgb) < 15
+
+def filter_and_prepare_points(predictions, conf_threshold, mask_sky=False, mask_black_bg=False, 
+                             mask_white_bg=False, stride=4):
     """
     Filter points based on confidence and prepare for COLMAP format.
     Uses stride to sample fewer points for efficiency.
     Extracts RGB color from original images.
+    Applies optional filtering for sky and backgrounds.
     """
     # Scale confidence threshold from percentage to actual value range
     max_conf = np.max(predictions["depth_conf"])
     conf_threshold = conf_threshold / 100.0 * max_conf
     
     print(f"Confidence threshold: {conf_threshold:.4f} (scaled from {conf_threshold*100/max_conf:.2f}%)")
+    print(f"Filtering options - Sky: {mask_sky}, Black BG: {mask_black_bg}, White BG: {mask_white_bg}")
     
     # Initialize containers
     points3D = []
@@ -141,14 +162,22 @@ def filter_and_prepare_points(predictions, conf_threshold, stride=4):
                     if not np.all(np.isfinite(point3D)):
                         continue
                     
-                    # Generate a hash for this point
-                    point_hash = hash_point(point3D, scale=100)
-                    
                     # Get RGB color from original image
                     # Map coordinates from depth map to original image
                     orig_y = min(int(y * scale_y), orig_h - 1)
                     orig_x = min(int(x * scale_x), orig_w - 1)
                     rgb = orig_img[orig_y, orig_x]
+                    
+                    # Apply filters
+                    if mask_sky and is_sky_point(point3D, rgb):
+                        continue
+                    if mask_black_bg and is_black_bg_point(rgb):
+                        continue
+                    if mask_white_bg and is_white_bg_point(rgb):
+                        continue
+                    
+                    # Generate a hash for this point
+                    point_hash = hash_point(point3D, scale=100)
                     
                     if point_hash not in point_indices:
                         # Create new point
@@ -350,9 +379,15 @@ def main():
                         help="Directory to save COLMAP files")
     parser.add_argument("--conf_threshold", type=float, default=50.0, 
                         help="Confidence threshold (0-100) for including points")
+    parser.add_argument("--mask_sky", action="store_true",
+                        help="Filter out points likely to be sky")
+    parser.add_argument("--mask_black_bg", action="store_true",
+                        help="Filter out points with very dark/black color")
+    parser.add_argument("--mask_white_bg", action="store_true",
+                        help="Filter out points with very bright/white color")
     parser.add_argument("--binary", action="store_true", 
                         help="Output binary COLMAP files instead of text")
-    parser.add_argument("--stride", type=int, default=4, 
+    parser.add_argument("--stride", type=int, default=1, 
                         help="Stride for point sampling (higher = fewer points)")
     
     args = parser.parse_args()
@@ -374,7 +409,11 @@ def main():
     # Filter and prepare points
     print(f"Filtering points with confidence threshold {args.conf_threshold}% and stride {args.stride}...")
     points3D, image_points2D = filter_and_prepare_points(
-        predictions, args.conf_threshold, args.stride)
+        predictions, args.conf_threshold, 
+        mask_sky=args.mask_sky, 
+        mask_black_bg=args.mask_black_bg,
+        mask_white_bg=args.mask_white_bg,
+        stride=args.stride)
     
     # Get image dimensions
     height, width = predictions["depth"].shape[1:3]
