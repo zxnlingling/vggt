@@ -6,7 +6,9 @@ import glob
 import struct
 from scipy.spatial.transform import Rotation
 import sys
+from PIL import Image  # Add this import for image handling
 
+# Add VGGT to path
 sys.path.append("vggt/")
 
 from vggt.models.vggt import VGGT
@@ -19,7 +21,7 @@ def load_model(device=None):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
-    
+
     model = VGGT.from_pretrained("facebook/VGGT-1B")
     
     model.eval()
@@ -35,9 +37,17 @@ def process_images(image_dir, model, device, conf_threshold=50.0):
     if len(image_names) == 0:
         raise ValueError(f"No images found in {image_dir}")
     
+    # Load original images for color extraction
+    original_images = []
+    for img_path in image_names:
+        img = Image.open(img_path).convert('RGB')
+        original_images.append(np.array(img))
+    
+    # Process images with VGGT
     images = load_and_preprocess_images(image_names).to(device)
     print(f"Preprocessed images shape: {images.shape}")
     
+    # Run inference
     print("Running inference...")
     dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
     
@@ -51,15 +61,19 @@ def process_images(image_dir, model, device, conf_threshold=50.0):
     predictions["extrinsic"] = extrinsic
     predictions["intrinsic"] = intrinsic
     
-   
+    # Convert tensors to numpy
     for key in predictions.keys():
         if isinstance(predictions[key], torch.Tensor):
             predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dimension
     
+    # Generate world points from depth map
     print("Computing 3D points from depth maps...")
     depth_map = predictions["depth"]  # (S, H, W, 1)
     world_points = unproject_depth_map_to_point_map(depth_map, predictions["extrinsic"], predictions["intrinsic"])
     predictions["world_points_from_depth"] = world_points
+    
+    # Store original images for color extraction
+    predictions["original_images"] = original_images
     
     return predictions, image_names
 
@@ -89,6 +103,7 @@ def filter_and_prepare_points(predictions, conf_threshold, stride=4):
     """
     Filter points based on confidence and prepare for COLMAP format.
     Uses stride to sample fewer points for efficiency.
+    Extracts RGB color from original images.
     """
     # Scale confidence threshold from percentage to actual value range
     max_conf = np.max(predictions["depth_conf"])
@@ -96,6 +111,7 @@ def filter_and_prepare_points(predictions, conf_threshold, stride=4):
     
     print(f"Confidence threshold: {conf_threshold:.4f} (scaled from {conf_threshold*100/max_conf:.2f}%)")
     
+    # Initialize containers
     points3D = []
     point_indices = {}  # Maps point hash to its index
     image_points2D = [[] for _ in range(len(predictions["depth"]))]
@@ -103,24 +119,39 @@ def filter_and_prepare_points(predictions, conf_threshold, stride=4):
     # Get world points and confidences
     world_points = predictions["world_points_from_depth"]  # (num_images, H, W, 3)
     confidences = predictions["depth_conf"]  # (num_images, H, W)
+    original_images = predictions["original_images"]  # List of numpy arrays (H, W, 3)
     
+    # Process each image
     for img_idx in range(len(world_points)):
         h, w = world_points[img_idx].shape[:2]
+        orig_img = original_images[img_idx]
         
+        # Handle possible resizing between original image and depth map
+        orig_h, orig_w = orig_img.shape[:2]
+        scale_y, scale_x = orig_h / h, orig_w / w
+        
+        # Sample points with stride
         for y in range(0, h, stride):
             for x in range(0, w, stride):
                 if confidences[img_idx, y, x] > conf_threshold:
+                    # Get 3D point
                     point3D = world_points[img_idx, y, x]
                     
+                    # Skip invalid points
                     if not np.all(np.isfinite(point3D)):
                         continue
                     
+                    # Generate a hash for this point
                     point_hash = hash_point(point3D, scale=100)
                     
-                    # Get RGB color (gray as default)
-                    rgb = np.array([200, 200, 200])
+                    # Get RGB color from original image
+                    # Map coordinates from depth map to original image
+                    orig_y = min(int(y * scale_y), orig_h - 1)
+                    orig_x = min(int(x * scale_x), orig_w - 1)
+                    rgb = orig_img[orig_y, orig_x]
                     
                     if point_hash not in point_indices:
+                        # Create new point
                         point_idx = len(points3D)
                         point_indices[point_hash] = point_idx
                         
@@ -133,10 +164,11 @@ def filter_and_prepare_points(predictions, conf_threshold, stride=4):
                         }
                         points3D.append(point_entry)
                     else:
+                        # Update existing point's track
                         point_idx = point_indices[point_hash]
                         points3D[point_idx]["track"].append((img_idx, len(image_points2D[img_idx])))
                     
-
+                    # Add 2D point to image
                     image_points2D[img_idx].append((x, y, point_indices[point_hash]))
     
     print(f"Generated {len(points3D)} 3D points with {sum(len(pts) for pts in image_points2D)} observations")
@@ -157,7 +189,7 @@ def write_colmap_cameras_txt(file_path, intrinsics, image_width, image_height):
         
         for i, intrinsic in enumerate(intrinsics):
             camera_id = i + 1  # COLMAP uses 1-indexed camera IDs
-            model = "PINHOLE"
+            model = "PINHOLE"  # Using PINHOLE model
             
             # Extract parameters for PINHOLE model: fx, fy, cx, cy
             fx = intrinsic[0, 0]
@@ -180,14 +212,17 @@ def write_colmap_images_txt(file_path, quaternions, translations, image_points2D
         f.write(f"# Number of images: {len(quaternions)}, mean observations per image: {avg_points:.1f}\n")
         
         for i in range(len(quaternions)):
-            image_id = i + 1  
+            image_id = i + 1  # COLMAP uses 1-indexed image IDs
             camera_id = i + 1  # Assuming each image has its own camera
             
+            # Extract quaternion and translation
             qw, qx, qy, qz = quaternions[i]
             tx, ty, tz = translations[i]
-
+            
+            # Write image pose
             f.write(f"{image_id} {qw} {qx} {qy} {qz} {tx} {ty} {tz} {camera_id} {os.path.basename(image_names[i])}\n")
             
+            # Write keypoints
             points_line = " ".join([f"{x} {y} {point3d_id+1}" for x, y, point3d_id in image_points2D[i]])
             f.write(f"{points_line}\n")
 
@@ -201,13 +236,15 @@ def write_colmap_points3D_txt(file_path, points3D):
         f.write(f"# Number of points: {len(points3D)}, mean track length: {avg_track_length:.4f}\n")
         
         for point in points3D:
-            point_id = point["id"] + 1 
+            point_id = point["id"] + 1  # COLMAP uses 1-indexed point IDs
             x, y, z = point["xyz"]
             r, g, b = point["rgb"]
             error = point["error"]
             
+            # Convert track to COLMAP format (1-indexed)
             track = " ".join([f"{img_id+1} {point2d_idx}" for img_id, point2d_idx in point["track"]])
             
+            # Write 3D point
             f.write(f"{point_id} {x} {y} {z} {int(r)} {int(g)} {int(b)} {error} {track}\n")
 
 def write_colmap_cameras_bin(file_path, intrinsics, image_width, image_height):
@@ -248,10 +285,14 @@ def write_colmap_images_bin(file_path, quaternions, translations, image_points2D
             image_id = i + 1
             camera_id = i + 1
             
+            # Extract quaternion and translation
             qw, qx, qy, qz = quaternions[i].astype(float)
             tx, ty, tz = translations[i].astype(float)
             
+            # Get image name and convert to bytes
             image_name = os.path.basename(image_names[i]).encode()
+            
+            # Get 2D points for this image
             points = image_points2D[i]
             
             # Image ID (uint32)
@@ -311,26 +352,34 @@ def main():
                         help="Confidence threshold (0-100) for including points")
     parser.add_argument("--binary", action="store_true", 
                         help="Output binary COLMAP files instead of text")
-    parser.add_argument("--stride", type=int, default=1, 
+    parser.add_argument("--stride", type=int, default=4, 
                         help="Stride for point sampling (higher = fewer points)")
     
     args = parser.parse_args()
     
+    # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
-
+    
+    # Load model
     model, device = load_model()
+    
+    # Process images
     predictions, image_names = process_images(
         args.image_dir, model, device, args.conf_threshold)
     
+    # Extract quaternions and translations
     print("Converting camera parameters to COLMAP format...")
     quaternions, translations = extrinsic_to_colmap_format(predictions["extrinsic"])
-
+    
+    # Filter and prepare points
     print(f"Filtering points with confidence threshold {args.conf_threshold}% and stride {args.stride}...")
     points3D, image_points2D = filter_and_prepare_points(
         predictions, args.conf_threshold, args.stride)
     
+    # Get image dimensions
     height, width = predictions["depth"].shape[1:3]
     
+    # Write COLMAP files
     print(f"Writing {'binary' if args.binary else 'text'} COLMAP files to {args.output_dir}...")
     if args.binary:
         write_colmap_cameras_bin(
