@@ -483,8 +483,9 @@ def write_colmap_images_bin(file_path, quaternions, translations, image_points2D
             # Camera ID (uint32)
             fid.write(struct.pack('<I', camera_id))
             # Image name
-            fid.write(struct.pack('<I', len(image_name)))
-            fid.write(image_name)
+            for char in image_name:
+                fid.write(struct.pack('<c', bytes([char])))
+            fid.write(struct.pack('<c', b'\x00'))
             
             # Write number of 2D points (uint64)
             fid.write(struct.pack('<Q', len(points)))
