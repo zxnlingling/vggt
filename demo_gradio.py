@@ -288,9 +288,22 @@ def update_visualization(
     if not os.path.exists(predictions_path):
         return None, f"No reconstruction available at {predictions_path}. Please run 'Reconstruct' first."
 
-    loaded = np.load(predictions_path, allow_pickle=True)
-    predictions = {key: loaded[key] for key in loaded.keys()}
+    key_list = [
+        'pose_enc',
+        'depth',
+        'depth_conf',
+        'world_points',
+        'world_points_conf',
+        'images',
+        'extrinsic',
+        'intrinsic',
+        'world_points_from_depth',
+    ]
 
+    loaded = np.load(predictions_path)
+    predictions = {key: np.array(loaded[key]) for key in key_list}
+
+    
     glbfile = os.path.join(
         target_dir,
         f"glbscene_{conf_thres}_{frame_filter.replace('.', '_').replace(':', '').replace(' ', '_')}_maskb{mask_black_bg}_maskw{mask_white_bg}_cam{show_cam}_sky{mask_sky}_pred{prediction_mode.replace(' ', '_')}.glb",
