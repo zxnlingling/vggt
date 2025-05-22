@@ -143,9 +143,8 @@ class AttnBlock(nn.Module):
         Self attention block
         """
         super().__init__()
-
-        self.norm1 = nn.LayerNorm(hidden_size)
-        self.norm2 = nn.LayerNorm(hidden_size)
+        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 
         self.attn = attn_class(embed_dim=hidden_size, num_heads=num_heads, batch_first=True, **block_kwargs)
 
@@ -176,10 +175,9 @@ class CrossAttnBlock(nn.Module):
         Cross attention block
         """
         super().__init__()
-
-        self.norm1 = nn.LayerNorm(hidden_size)
+        self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.norm_context = nn.LayerNorm(hidden_size)
-        self.norm2 = nn.LayerNorm(hidden_size)
+        self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
 
         self.cross_attn = nn.MultiheadAttention(
             embed_dim=hidden_size, num_heads=num_heads, batch_first=True, **block_kwargs

@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-# Modified from https://github.com/facebookresearch/vggsfm
+# Modified from https://github.com/facebookresearch/PoseDiffusion
 # and https://github.com/facebookresearch/co-tracker/tree/main
 
 
@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from typing import Optional, Tuple, Union
+from einops import rearrange, repeat
 
 
 def get_2d_sincos_pos_embed(embed_dim: int, grid_size: Union[int, Tuple[int, int]], return_grid=False) -> torch.Tensor:
@@ -163,11 +164,6 @@ def bilinear_sampler(input, coords, align_corners=True, padding_mode="border"):
     Returns:
         Tensor: sampled points.
     """
-    coords = coords.detach().clone()
-    ############################################################
-    # IMPORTANT:
-    coords = coords.to(input.device).to(input.dtype)
-    ############################################################
 
     sizes = input.shape[2:]
 
@@ -178,14 +174,11 @@ def bilinear_sampler(input, coords, align_corners=True, padding_mode="border"):
         coords = coords[..., [1, 2, 0]]
 
     if align_corners:
-        scale = torch.tensor(
-            [2 / max(size - 1, 1) for size in reversed(sizes)], device=coords.device, dtype=coords.dtype
-        )
+        coords = coords * torch.tensor([2 / max(size - 1, 1) for size in reversed(sizes)], device=coords.device)
     else:
-        scale = torch.tensor([2 / size for size in reversed(sizes)], device=coords.device, dtype=coords.dtype)
+        coords = coords * torch.tensor([2 / size for size in reversed(sizes)], device=coords.device)
 
-    coords.mul_(scale)  # coords = coords * scale
-    coords.sub_(1)  # coords = coords - 1
+    coords -= 1
 
     return F.grid_sample(input, coords, align_corners=align_corners, padding_mode=padding_mode)
 

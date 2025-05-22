@@ -24,11 +24,7 @@ class VGGT(nn.Module, PyTorchModelHubMixin):
         self.depth_head = DPTHead(dim_in=2 * embed_dim, output_dim=2, activation="exp", conf_activation="expp1")
         self.track_head = TrackHead(dim_in=2 * embed_dim, patch_size=patch_size)
 
-    def forward(
-        self,
-        images: torch.Tensor,
-        query_points: torch.Tensor = None,
-    ):
+    def forward(self, images: torch.Tensor, query_points: torch.Tensor = None):
         """
         Forward pass of the VGGT model.
 

@@ -42,10 +42,7 @@ def unproject_depth_map_to_point_map(
 
 
 def depth_to_world_coords_points(
-    depth_map: np.ndarray,
-    extrinsic: np.ndarray,
-    intrinsic: np.ndarray,
-    eps=1e-8,
+    depth_map: np.ndarray, extrinsic: np.ndarray, intrinsic: np.ndarray, eps=1e-8
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Convert a depth map to world coordinates.
