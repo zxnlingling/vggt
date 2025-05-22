@@ -228,9 +228,6 @@ def demo_fn(args):
 
         reconstruction_resolution = vggt_fixed_resolution
 
-    # Save point cloud for fast visualization
-    trimesh.PointCloud(points_3d, colors=points_rgb).export(os.path.join(args.scene_dir, "sparse/points.ply"))
-
     reconstruction = rename_colmap_recons_and_rescale_camera(
         reconstruction,
         base_image_path_list,
@@ -244,6 +241,9 @@ def demo_fn(args):
     sparse_reconstruction_dir = os.path.join(args.scene_dir, "sparse")
     os.makedirs(sparse_reconstruction_dir, exist_ok=True)
     reconstruction.write(sparse_reconstruction_dir)
+
+    # Save point cloud for fast visualization
+    trimesh.PointCloud(points_3d, colors=points_rgb).export(os.path.join(args.scene_dir, "sparse/points.ply"))
 
     return True
 
