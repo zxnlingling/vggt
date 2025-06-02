@@ -56,6 +56,9 @@ def parse_args():
     parser.add_argument(
         "--fine_tracking", action="store_true", default=True, help="Use fine tracking (slower but more accurate)"
     )
+    parser.add_argument(
+        "--conf_thres_value", type=float, default=5.0, help="Confidence threshold value for depth filtering (wo BA)"
+    )
     return parser.parse_args()
 
 
@@ -189,7 +192,7 @@ def demo_fn(args):
 
         reconstruction_resolution = img_load_resolution
     else:
-        conf_thres_value = 5  # hard-coded to 5
+        conf_thres_value = args.conf_thres_value
         max_points_for_colmap = 100000  # randomly sample 3D points
         shared_camera = False  # in the feedforward manner, we do not support shared camera
         camera_type = "PINHOLE"  # in the feedforward manner, we only support PINHOLE camera

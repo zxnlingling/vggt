@@ -25,7 +25,10 @@
 ```
 
 ## Updates
-- [May 3, 2025] Evaluation code for reproducing our camera pose estimation results on Co3D is now available in the [evaluation](https://github.com/facebookresearch/vggt/tree/evaluation) branch. VGGT+BA implementation is coming.
+- [June 2, 2025] Added a script to run VGGT and save predictions in COLMAP format, with bundle adjustment support optional. The saved COLMAP files can be directly used with [gsplat](https://github.com/nerfstudio-project/gsplat) or other NeRF/Gaussian splatting libraries.
+
+
+- [May 3, 2025] Evaluation code for reproducing our camera pose estimation results on Co3D is now available in the [evaluation](https://github.com/facebookresearch/vggt/tree/evaluation) branch. 
 
 
 - [Apr 13, 2025] Training code is being gradually cleaned and uploaded to the [training](https://github.com/facebookresearch/vggt/tree/training) branch. It will be merged into the main branch once finalized.
@@ -83,6 +86,9 @@ model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
 
 ## Detailed Usage
 
+<details>
+<summary>Click to expand</summary>
+
 You can also optionally choose which attributes (branches) to predict, as shown below. This achieves the same result as the example above. This example uses a batch size of 1 (processing a single scene), but it naturally works for multiple scenes.
 
 ```python
@@ -121,8 +127,10 @@ with torch.no_grad():
 
 Furthermore, if certain pixels in the input frames are unwanted (e.g., reflective surfaces, sky, or water), you can simply mask them by setting the corresponding pixel values to 0 or 1. Precise segmentation masks aren't necessary - simple bounding box masks work effectively (check this [issue](https://github.com/facebookresearch/vggt/issues/47) for an example).
 
+</details>
 
-## Visualization
+
+## Interactive Demo
 
 We provide multiple ways to visualize your 3D reconstructions and tracking results. Before using these visualization tools, install the required dependencies:
 
@@ -159,17 +167,43 @@ Run the following command to run reconstruction and visualize the point clouds i
 python demo_viser.py --image_folder path/to/your/images/folder
 ```
 
+#### Exporting to COLMAP Format
 
-### Track Visualization
+We also support exporting VGGT's predictions directly to COLMAP format, by:
 
-To visualize point tracks across multiple images:
+```bash 
+# Feedforward prediction only
+python demo_colmap.py --scene_dir=/YOUR/SCENE_DIR/ 
 
-```python
-from vggt.utils.visual_track import visualize_tracks_on_images
-track = track_list[-1]
-visualize_tracks_on_images(images, track, (conf_score>0.2) & (vis_score>0.2), out_dir="track_visuals")
+# With bundle adjustment
+python demo_colmap.py --scene_dir=/YOUR/SCENE_DIR/ --use_ba
+# check the file for additional bundle adjustment configuration options
 ```
-This plots the tracks on the images and saves them to the specified output directory. 
+
+Please ensure that the images are stored in `/YOUR/SCENE_DIR/images/`. This folder should contain only the images. Check the examples folder for the desired data structure. 
+
+The reconstruction result (camera parameters and 3D points) will be automatically saved under `/YOUR/SCENE_DIR/sparse/` in the COLMAP format, such as:
+
+``` 
+SCENE_DIR/
+├── images/
+└── sparse/
+    ├── cameras.bin
+    ├── images.bin
+    └── points3D.bin
+```
+
+#### Integration with Gaussian Splatting
+
+
+The exported COLMAP files can be directly used with [gsplat](https://github.com/nerfstudio-project/gsplat) for Gaussian Splatting training. Install `gsplat` following their official instructions (we recommend `gsplat==1.3.0`):
+
+An example command to train the model is:
+```
+cd gsplat
+python examples/simple_trainer.py  default --data_factor 1 --data_dir /YOUR/SCENE_DIR/ --result_dir /YOUR/RESULT_DIR/
+```
+
 
 
 ## Single-view Reconstruction
