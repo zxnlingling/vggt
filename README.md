@@ -132,7 +132,7 @@ Furthermore, if certain pixels in the input frames are unwanted (e.g., reflectiv
 
 ## Interactive Demo
 
-We provide multiple ways to visualize your 3D reconstructions and tracking results. Before using these visualization tools, install the required dependencies:
+We provide multiple ways to visualize your 3D reconstructions. Before using these visualization tools, install the required dependencies:
 
 ```bash
 pip install -r requirements_demo.txt
@@ -167,7 +167,7 @@ Run the following command to run reconstruction and visualize the point clouds i
 python demo_viser.py --image_folder path/to/your/images/folder
 ```
 
-#### Exporting to COLMAP Format
+## Exporting to COLMAP Format
 
 We also support exporting VGGT's predictions directly to COLMAP format, by:
 
@@ -193,7 +193,7 @@ SCENE_DIR/
     └── points3D.bin
 ```
 
-#### Integration with Gaussian Splatting
+## Integration with Gaussian Splatting
 
 
 The exported COLMAP files can be directly used with [gsplat](https://github.com/nerfstudio-project/gsplat) for Gaussian Splatting training. Install `gsplat` following their official instructions (we recommend `gsplat==1.3.0`):
