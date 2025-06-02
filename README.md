@@ -206,7 +206,7 @@ python examples/simple_trainer.py  default --data_factor 1 --data_dir /YOUR/SCEN
 
 
 
-## Single-view Reconstruction
+## Zero-shot Single-view Reconstruction
 
 Our model shows surprisingly good performance on single-view reconstruction, although it was never trained for this task. The model does not need to duplicate the single-view image to a pair, instead, it can directly infer the 3D structure from the tokens of the single view image. Feel free to try it with our demos above, which naturally works for single-view reconstruction.
 
