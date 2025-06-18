@@ -180,7 +180,12 @@ python demo_colmap.py --scene_dir=/YOUR/SCENE_DIR/
 
 # With bundle adjustment
 python demo_colmap.py --scene_dir=/YOUR/SCENE_DIR/ --use_ba
-# check the file for additional bundle adjustment configuration options
+
+# Run with bundle adjustment using reduced parameters for faster processing
+# Reduces max_query_pts from 4096 (default) to 2048 and query_frame_num from 8 (default) to 5
+# Trade-off: Faster execution but potentially less robust reconstruction in complex scenes (you may consider setting query_frame_num equal to your total number of images) 
+# See demo_colmap.py for additional bundle adjustment configuration options
+python demo_colmap.py --scene_dir=/YOUR/SCENE_DIR/ --use_ba --max_query_pts=2048 --query_frame_num=5
 ```
 
 Please ensure that the images are stored in `/YOUR/SCENE_DIR/images/`. This folder should contain only the images. Check the examples folder for the desired data structure. 
