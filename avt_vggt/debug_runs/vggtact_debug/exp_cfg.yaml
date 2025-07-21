@@ -1,0 +1,32 @@
+bs: 16
+demo: 100
+epochs: 90
+exp_id: vggtact
+exp_name: debug
+num_workers: 5
+resume: ''
+rvt:
+  num_rotation_classes: 72
+  transform_augmentation: true
+  transform_augmentation_rpy:
+  - 0.0
+  - 0.0
+  - 45.0
+  transform_augmentation_xyz:
+  - 0.125
+  - 0.125
+  - 0.125
+sample_distribution_mode: task_uniform
+tasks: all_rlbench
+train_iter: 160000
+vggt:
+  image_resolution: 224
+  img_aug: 0.0
+  lambda_weight_l2: 0.0001
+  lr: 1.25e-05
+  optimizer_type: lamb
+  stage_two: true
+  use_input_pc: true
+  warmup_steps: 2000
+wandb: false
+

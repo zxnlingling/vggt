@@ -1,0 +1,6 @@
+# VGGT Model
+model:
+  _target_: vggt.models.vggt.VGGT
+  img_size: 224
+  patch_size: 14
+  embed_dim: 1024

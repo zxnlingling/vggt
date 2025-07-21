@@ -1,0 +1,86 @@
+activation: lrelu
+add_corr: true
+add_depth: true
+add_pixel_loc: true
+attn_dim: 512
+attn_dim_head: 64
+attn_dropout: 0.1
+attn_heads: 8
+base_replay_dir: /fs-computility/efm/shared/datasets/Official_Manipulation_Data/sim/colosseum/replay_train_varying_keypoints
+bs: 8
+decoder_dropout: 0.0
+demo: 100
+depth: 8
+epochs: 20
+exp_id: def
+exp_name: test
+feat_dim: 220
+final_dim: 64
+im_channels: 64
+img_aug_2: 0.0
+img_feat_dim: 3
+img_patch_size: 14
+img_size: 224
+lang_dim: 512
+lang_len: 77
+lora_finetune: true
+lora_r: 16
+norm_corr: true
+num_rot: 72
+num_workers: 3
+peract:
+  add_rgc_loss: true
+  same_trans_aug_per_seq: false
+peract_official:
+  cfg_path: configs/peract_official_config.yaml
+proprio_dim: 18
+rend_three_views: false
+resume: ''
+rvt:
+  img_aug: 0.1
+  place_with_mean: true
+sample_distribution_mode: task_uniform
+st_sca: 4
+st_wpt_loc_aug: 0.05
+st_wpt_loc_inp_no_noise: true
+stage_two: true
+tasks: all_colosseum
+train_iter: 160000
+use_ray_renderer: false
+vggt:
+  image_resolution:
+  - 196
+  - 182
+  - 168
+  - 154
+  - 140
+  - 126
+  - 112
+  - 98
+  - 84
+  - 70
+  - 56
+  - 42
+  img_aug: false
+  lambda_weight_l2: 0.0001
+  lr: 0.0002
+  num_rotation_classes: 72
+  optimizer_type: adamw
+  pretrained_ckpt: /fs-computility/efm/lvqi/projects/colosseum/SAM2Act/sam2Act_COLOSSEUM/third_libraries/vggt/model.pt
+  stage_two: true
+  transform_augmentation: true
+  transform_augmentation_rpy:
+  - 0.0
+  - 0.0
+  - 45.0
+  transform_augmentation_xyz:
+  - 0.125
+  - 0.125
+  - 0.125
+  use_input_pc: true
+  warmup_steps: 8000
+wandb: false
+weight_tie_layers: false
+wpt_img_aug: 0.01
+xops: true
+

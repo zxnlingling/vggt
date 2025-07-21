@@ -1,0 +1,8 @@
+device: '0'
+exp_cfg_opts: tasks all_colosseum
+exp_cfg_path: ''
+log_dir: debug_runs
+refresh_replay: false
+vggt_cfg_opts: ''
+vggt_cfg_path: ''
+with_eval: false

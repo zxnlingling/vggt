@@ -1,0 +1,6 @@
+exp_cfg_opts: tasks all_rlbench
+exp_cfg_path: ''
+log_dir: debug_runs
+refresh_replay: false
+vggt_cfg_opts: ''
+vggt_cfg_path: ''
